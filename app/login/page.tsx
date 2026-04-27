@@ -1,8 +1,10 @@
 'use client'
 
+import Image from 'next/image'
 import { FormEvent, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import logo from '@/logo.png'
 
 export default function Login() {
   const router = useRouter()
@@ -50,7 +52,13 @@ export default function Login() {
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
       <section className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-6">
-          <p className="text-sm font-semibold uppercase tracking-widest text-emerald-700">Farmacia Ocampo</p>
+          <div className="mb-4 flex items-center gap-3">
+            <Image src={logo} alt="Logo de Farmacia Ocampo" className="h-16 w-16 rounded-2xl object-contain" priority />
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-widest text-emerald-700">Farmacia Ocampo</p>
+              <p className="text-sm text-slate-500">Sistema de gestion</p>
+            </div>
+          </div>
           <h1 className="mt-2 text-2xl font-bold text-slate-950">{mode === 'login' ? 'Iniciar sesion' : 'Registrar usuario'}</h1>
           <p className="mt-1 text-sm text-slate-600">Accede con correo y contraseña para administrar inventario, ventas y reportes.</p>
         </div>

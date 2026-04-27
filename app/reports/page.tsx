@@ -16,6 +16,7 @@ const rangeLabels: Record<Range, string> = {
 export default function ReportsPage() {
   const [range, setRange] = useState<Range>('daily')
   const [sales, setSales] = useState<SaleSummary[]>([])
+  const [exporting, setExporting] = useState(false)
 
   const fromDate = useMemo(() => {
     const date = new Date()
@@ -37,20 +38,76 @@ export default function ReportsPage() {
   const total = sales.reduce((sum, sale) => sum + Number(sale.total), 0)
   const average = sales.length ? total / sales.length : 0
 
+  const exportPdf = async () => {
+    setExporting(true)
+
+    try {
+      const [{ jsPDF }, { default: autoTable }] = await Promise.all([import('jspdf'), import('jspdf-autotable')])
+      const doc = new jsPDF()
+      const generatedAt = new Date()
+      const fileDate = generatedAt.toISOString().slice(0, 10)
+
+      doc.setFontSize(18)
+      doc.text('Farmacia Ocampo', 14, 18)
+      doc.setFontSize(12)
+      doc.text(`Reporte de ventas ${rangeLabels[range].toLowerCase()}`, 14, 27)
+      doc.setFontSize(10)
+      doc.text(`Generado: ${generatedAt.toLocaleString('es-NI')}`, 14, 35)
+      doc.text(`Ventas registradas: ${sales.length}`, 14, 42)
+      doc.text(`Total vendido: ${formatCurrency(total)}`, 14, 49)
+      doc.text(`Promedio por venta: ${formatCurrency(average)}`, 14, 56)
+
+      autoTable(doc, {
+        startY: 64,
+        head: [['Fecha', 'Codigo', 'Cliente', 'Pago', 'Total']],
+        body:
+          sales.length > 0
+            ? sales.map((sale) => [
+                new Date(sale.created_at).toLocaleString('es-NI'),
+                sale.sale_code ?? String(sale.id),
+                sale.customer_name ?? 'Consumidor final',
+                sale.payment_method,
+                formatCurrency(Number(sale.total)),
+              ])
+            : [['Sin ventas en este periodo', '', '', '', '']],
+        styles: {
+          fontSize: 9,
+        },
+        headStyles: {
+          fillColor: [4, 120, 87],
+        },
+      })
+
+      doc.save(`reporte-ventas-${range}-${fileDate}.pdf`)
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <AppShell title="Reportes de ventas" subtitle="Consulta ventas diarias, semanales y mensuales.">
       <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap gap-2">
-          {Object.entries(rangeLabels).map(([key, label]) => (
-            <button
-              key={key}
-              onClick={() => setRange(key as Range)}
-              className={`rounded-md px-4 py-2 text-sm font-semibold ${range === key ? 'bg-emerald-700 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(rangeLabels).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setRange(key as Range)}
+                className={`rounded-md px-4 py-2 text-sm font-semibold ${range === key ? 'bg-emerald-700 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={exportPdf}
+            disabled={exporting}
+            className="rounded-md border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:border-slate-300 disabled:text-slate-400"
+          >
+            {exporting ? 'Generando PDF...' : 'Descargar PDF'}
+          </button>
         </div>
+        <div className="mt-3 text-sm text-slate-500">El PDF se genera con el mismo periodo que ves en pantalla.</div>
       </section>
 
       <section className="mt-6 grid gap-4 md:grid-cols-3">
@@ -95,4 +152,8 @@ function Metric({ label, value }: { label: string; value: string }) {
       <p className="mt-2 text-3xl font-bold text-slate-950">{value}</p>
     </div>
   )
+}
+
+function formatCurrency(value: number) {
+  return `C$ ${value.toFixed(2)}`
 }
