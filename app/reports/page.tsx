@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { AppShell } from '@/components/AppShell'
+import { formatNicaraguaDateForFileName, formatNicaraguaDateTime, getStartOfNicaraguaRange } from '@/lib/date'
 import { supabase } from '@/lib/supabase'
-import type { SaleSummary } from '@/lib/types'
+import type { SaleItemSummary, SaleSummary, SaleWithItems } from '@/lib/types'
 
 type Range = 'daily' | 'weekly' | 'monthly'
 
@@ -15,24 +16,47 @@ const rangeLabels: Record<Range, string> = {
 
 export default function ReportsPage() {
   const [range, setRange] = useState<Range>('daily')
-  const [sales, setSales] = useState<SaleSummary[]>([])
+  const [sales, setSales] = useState<SaleWithItems[]>([])
   const [exporting, setExporting] = useState(false)
 
-  const fromDate = useMemo(() => {
-    const date = new Date()
-    if (range === 'daily') date.setHours(0, 0, 0, 0)
-    if (range === 'weekly') date.setDate(date.getDate() - 6)
-    if (range === 'monthly') date.setMonth(date.getMonth() - 1)
-    return date.toISOString()
-  }, [range])
+  const fromDate = useMemo(() => getStartOfNicaraguaRange(range), [range])
 
   useEffect(() => {
-    supabase
-      .from('sales')
-      .select('id,sale_code,total,payment_method,customer_name,created_at')
-      .gte('created_at', fromDate)
-      .order('created_at', { ascending: false })
-      .then(({ data }) => setSales((data as SaleSummary[]) ?? []))
+    const loadSales = async () => {
+      const { data: salesData, error: salesError } = await supabase
+        .from('sales')
+        .select('id,sale_code,total,payment_method,customer_name,created_at')
+        .gte('created_at', fromDate)
+        .order('created_at', { ascending: false })
+
+      if (salesError || !salesData) {
+        setSales([])
+        return
+      }
+
+      const baseSales = salesData as SaleSummary[]
+      if (baseSales.length === 0) {
+        setSales([])
+        return
+      }
+
+      const saleIds = baseSales.map((sale) => sale.id)
+      const { data: itemsData } = await supabase
+        .from('sale_items')
+        .select('id,sale_id,quantity,unit_price,product_id,products(name)')
+        .in('sale_id', saleIds)
+
+      const itemsBySaleId = ((itemsData as SaleItemSummary[] | null) ?? []).reduce<Record<number, SaleItemSummary[]>>((accumulator, item) => {
+        const saleId = Number(item.sale_id)
+        if (!accumulator[saleId]) accumulator[saleId] = []
+        accumulator[saleId].push(item)
+        return accumulator
+      }, {})
+
+      setSales(baseSales.map((sale) => ({ ...sale, sale_items: itemsBySaleId[sale.id] ?? [] })))
+    }
+
+    loadSales()
   }, [fromDate])
 
   const total = sales.reduce((sum, sale) => sum + Number(sale.total), 0)
@@ -43,38 +67,39 @@ export default function ReportsPage() {
 
     try {
       const [{ jsPDF }, { default: autoTable }] = await Promise.all([import('jspdf'), import('jspdf-autotable')])
-      const doc = new jsPDF()
+      const doc = new jsPDF({ orientation: 'landscape' })
       const generatedAt = new Date()
-      const fileDate = generatedAt.toISOString().slice(0, 10)
+      const fileDate = formatNicaraguaDateForFileName(generatedAt)
+      const pdfRows = buildPdfRows(sales)
 
       doc.setFontSize(18)
       doc.text('Farmacia Ocampo', 14, 18)
       doc.setFontSize(12)
       doc.text(`Reporte de ventas ${rangeLabels[range].toLowerCase()}`, 14, 27)
       doc.setFontSize(10)
-      doc.text(`Generado: ${generatedAt.toLocaleString('es-NI')}`, 14, 35)
+      doc.text(`Generado: ${formatNicaraguaDateTime(generatedAt)}`, 14, 35)
       doc.text(`Ventas registradas: ${sales.length}`, 14, 42)
       doc.text(`Total vendido: ${formatCurrency(total)}`, 14, 49)
       doc.text(`Promedio por venta: ${formatCurrency(average)}`, 14, 56)
 
       autoTable(doc, {
         startY: 64,
-        head: [['Fecha', 'Codigo', 'Cliente', 'Pago', 'Total']],
-        body:
-          sales.length > 0
-            ? sales.map((sale) => [
-                new Date(sale.created_at).toLocaleString('es-NI'),
-                sale.sale_code ?? String(sale.id),
-                sale.customer_name ?? 'Consumidor final',
-                sale.payment_method,
-                formatCurrency(Number(sale.total)),
-              ])
-            : [['Sin ventas en este periodo', '', '', '', '']],
+        head: [['Fecha', 'Codigo', 'Cliente', 'Producto', 'Cant.', 'Pago', 'Subtotal']],
+        body: pdfRows.length > 0 ? pdfRows : [['Sin ventas en este periodo', '', '', '', '', '', '']],
         styles: {
           fontSize: 9,
         },
         headStyles: {
           fillColor: [4, 120, 87],
+        },
+        columnStyles: {
+          0: { cellWidth: 32 },
+          1: { cellWidth: 35 },
+          2: { cellWidth: 45 },
+          3: { cellWidth: 85 },
+          4: { cellWidth: 18 },
+          5: { cellWidth: 28 },
+          6: { cellWidth: 25 },
         },
       })
 
@@ -123,6 +148,7 @@ export default function ReportsPage() {
               <th className="px-4 py-3">Fecha</th>
               <th className="px-4 py-3">Codigo</th>
               <th className="px-4 py-3">Cliente</th>
+              <th className="px-4 py-3">Productos</th>
               <th className="px-4 py-3">Pago</th>
               <th className="px-4 py-3">Total</th>
             </tr>
@@ -130,9 +156,22 @@ export default function ReportsPage() {
           <tbody>
             {sales.map((sale) => (
               <tr key={sale.id} className="border-b last:border-0">
-                <td className="px-4 py-3">{new Date(sale.created_at).toLocaleString('es-NI')}</td>
+                <td className="px-4 py-3">{formatNicaraguaDateTime(sale.created_at)}</td>
                 <td className="px-4 py-3 font-mono text-xs">{sale.sale_code ?? sale.id}</td>
                 <td className="px-4 py-3">{sale.customer_name ?? 'Consumidor final'}</td>
+                <td className="px-4 py-3">
+                  <div className="space-y-1">
+                    {(sale.sale_items ?? []).length > 0 ? (
+                      sale.sale_items?.map((item) => (
+                        <p key={item.id} className="text-xs text-slate-700">
+                          {item.products?.name ?? 'Producto'} x{item.quantity} - C$ {Number(item.subtotal ?? item.quantity * item.unit_price).toFixed(2)}
+                        </p>
+                      ))
+                    ) : (
+                      <p className="text-xs text-slate-500">Sin detalle</p>
+                    )}
+                  </div>
+                </td>
                 <td className="px-4 py-3">{sale.payment_method}</td>
                 <td className="px-4 py-3 font-medium">C$ {Number(sale.total).toFixed(2)}</td>
               </tr>
@@ -156,4 +195,32 @@ function Metric({ label, value }: { label: string; value: string }) {
 
 function formatCurrency(value: number) {
   return `C$ ${value.toFixed(2)}`
+}
+
+function formatSaleItems(sale: SaleWithItems) {
+  if (!sale.sale_items || sale.sale_items.length === 0) return 'Sin detalle'
+
+  return sale.sale_items
+    .map((item) => `${item.products?.name ?? 'Producto'} x${item.quantity} (C$ ${Number(item.subtotal ?? item.quantity * item.unit_price).toFixed(2)})`)
+    .join('\n')
+}
+
+function buildPdfRows(sales: SaleWithItems[]) {
+  return sales.flatMap((sale) => {
+    const items = sale.sale_items ?? []
+
+    if (items.length === 0) {
+      return [[formatNicaraguaDateTime(sale.created_at), sale.sale_code ?? String(sale.id), sale.customer_name ?? 'Consumidor final', 'Sin detalle', '', sale.payment_method, formatCurrency(Number(sale.total))]]
+    }
+
+    return items.map((item) => [
+      formatNicaraguaDateTime(sale.created_at),
+      sale.sale_code ?? String(sale.id),
+      sale.customer_name ?? 'Consumidor final',
+      item.products?.name ?? 'Producto',
+      String(item.quantity),
+      sale.payment_method,
+      formatCurrency(Number(item.subtotal ?? item.quantity * item.unit_price)),
+    ])
+  })
 }

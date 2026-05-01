@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { AppShell } from '@/components/AppShell'
+import { getStartOfNicaraguaDay } from '@/lib/date'
 import { supabase } from '@/lib/supabase'
 import type { Product, SaleSummary } from '@/lib/types'
 
@@ -12,7 +13,12 @@ export default function Dashboard() {
 
   useEffect(() => {
     supabase.from('products').select('*, units:unit_id(name), presentations:presentation_id(name)').order('name').then(({ data }) => setProducts((data as Product[]) ?? []))
-    supabase.from('sales').select('id,sale_code,total,payment_method,customer_name,created_at').gte('created_at', new Date().toISOString().slice(0, 10)).order('created_at', { ascending: false }).then(({ data }) => setSales((data as SaleSummary[]) ?? []))
+    supabase
+      .from('sales')
+      .select('id,sale_code,total,payment_method,customer_name,created_at')
+      .gte('created_at', getStartOfNicaraguaDay())
+      .order('created_at', { ascending: false })
+      .then(({ data }) => setSales((data as SaleSummary[]) ?? []))
   }, [])
 
   const lowStock = useMemo(() => products.filter((product) => product.stock_quantity <= product.min_stock), [products])

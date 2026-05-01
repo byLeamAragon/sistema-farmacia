@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from 'react'
 import { AppShell } from '@/components/AppShell'
+import { formatNicaraguaDateTime } from '@/lib/date'
 import { supabase } from '@/lib/supabase'
 import type { InventoryMovement, Product } from '@/lib/types'
 
@@ -98,7 +99,7 @@ export default function InventoryPage() {
           <tbody>
             {movements.map((movement) => (
               <tr key={movement.id} className="border-b last:border-0">
-                <td className="px-4 py-3">{new Date(movement.created_at).toLocaleString('es-NI')}</td>
+                <td className="px-4 py-3">{formatNicaraguaDateTime(movement.created_at)}</td>
                 <td className="px-4 py-3 font-mono text-xs">{movement.movement_code ?? movement.id}</td>
                 <td className="px-4 py-3 font-medium">{movement.products?.name}</td>
                 <td className="px-4 py-3">{movement.movement_type}</td>

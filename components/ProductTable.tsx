@@ -4,10 +4,14 @@ export function ProductTable({
   products,
   onEdit,
   onAddToSale,
+  saleQuantities,
+  onSaleQuantityChange,
 }: {
   products: Product[]
   onEdit?: (product: Product) => void
-  onAddToSale?: (product: Product) => void
+  onAddToSale?: (product: Product, quantity?: number) => void
+  saleQuantities?: Record<number, string>
+  onSaleQuantityChange?: (productId: number, value: string) => void
 }) {
   return (
     <section className="mt-6 overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
@@ -32,6 +36,7 @@ export function ProductTable({
               <td className="px-4 py-3">
                 <p className="font-medium">{product.name}</p>
                 <p className="text-xs text-slate-500">{product.dose || product.description}</p>
+                {product.barcode ? <p className="text-xs text-slate-400">CB: {product.barcode}</p> : null}
               </td>
               <td className="px-4 py-3">C$ {Number(product.price).toFixed(2)}</td>
               <td className="px-4 py-3">{product.type}</td>
@@ -43,9 +48,19 @@ export function ProductTable({
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-2">
                     {onAddToSale ? (
-                      <button onClick={() => onAddToSale(product)} className="rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800">
-                        Agregar a venta
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min="1"
+                          max={product.stock_quantity}
+                          value={saleQuantities?.[product.id] ?? '1'}
+                          onChange={(event) => onSaleQuantityChange?.(product.id, event.target.value)}
+                          className="w-16 rounded-md border border-slate-300 px-2 py-1.5 text-center text-xs"
+                        />
+                        <button onClick={() => onAddToSale(product, Number(saleQuantities?.[product.id] ?? '1'))} className="rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800">
+                          Agregar
+                        </button>
+                      </div>
                     ) : null}
                     {onEdit ? (
                       <button onClick={() => onEdit(product)} className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold hover:bg-slate-100">

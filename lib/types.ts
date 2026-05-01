@@ -33,6 +33,19 @@ export type SaleSummary = {
   created_at: string
 }
 
+export type SaleItemSummary = {
+  id: number
+  sale_id?: number
+  quantity: number
+  unit_price: number
+  subtotal?: number
+  products?: Pick<Product, 'name'> | null
+}
+
+export type SaleWithItems = SaleSummary & {
+  sale_items?: SaleItemSummary[]
+}
+
 export type InventoryMovement = {
   id: number
   movement_code: string | null
