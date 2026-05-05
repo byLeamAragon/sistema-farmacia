@@ -54,7 +54,7 @@ function getNicaraguaOffsetInMinutes(date: Date) {
   return (utcTime - date.getTime()) / 60000
 }
 
-function shiftDateParts(parts: DateParts, { days = 0, months = 0 }: { days?: number; months?: number }) {
+function shiftDateParts(parts: Pick<DateParts, 'year' | 'month' | 'day'>, { days = 0, months = 0 }: { days?: number; months?: number }) {
   const shifted = new Date(Date.UTC(parts.year, parts.month - 1, parts.day))
 
   if (days !== 0) shifted.setUTCDate(shifted.getUTCDate() + days)
@@ -96,6 +96,31 @@ export function getStartOfNicaraguaRange(range: SupportedRange, date = new Date(
   return getNicaraguaMidnightUtc(monthlyStart).toISOString()
 }
 
+export function formatNicaraguaDateInput(date = new Date()) {
+  const { year, month, day } = getNicaraguaDateParts(date)
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
+export function getNicaraguaDateInputFromToday({ days = 0, months = 0 }: { days?: number; months?: number }) {
+  const currentDate = getNicaraguaDateParts(new Date())
+  const shifted = shiftDateParts(currentDate, { days, months })
+  return `${shifted.year}-${String(shifted.month).padStart(2, '0')}-${String(shifted.day).padStart(2, '0')}`
+}
+
+export function getNicaraguaDateInputRange(startDate: string, endDate: string) {
+  const start = parseDateInput(startDate)
+  const end = parseDateInput(endDate)
+
+  if (!start || !end) return null
+
+  const endExclusive = shiftDateParts(end, { days: 1 })
+
+  return {
+    from: getNicaraguaMidnightUtc(start).toISOString(),
+    to: getNicaraguaMidnightUtc(endExclusive).toISOString(),
+  }
+}
+
 export function formatNicaraguaDateTime(value: string | Date) {
   const date = value instanceof Date ? value : new Date(value)
   return displayFormatter.format(date)
@@ -104,4 +129,15 @@ export function formatNicaraguaDateTime(value: string | Date) {
 export function formatNicaraguaDateForFileName(date = new Date()) {
   const { year, month, day } = getNicaraguaDateParts(date)
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
+function parseDateInput(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!match) return null
+
+  return {
+    year: Number(match[1]),
+    month: Number(match[2]),
+    day: Number(match[3]),
+  }
 }

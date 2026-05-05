@@ -2,7 +2,13 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { AppShell } from '@/components/AppShell'
-import { formatNicaraguaDateForFileName, formatNicaraguaDateTime, getStartOfNicaraguaRange } from '@/lib/date'
+import {
+  formatNicaraguaDateForFileName,
+  formatNicaraguaDateInput,
+  formatNicaraguaDateTime,
+  getNicaraguaDateInputFromToday,
+  getNicaraguaDateInputRange,
+} from '@/lib/date'
 import { supabase } from '@/lib/supabase'
 import type { SaleItemSummary, SaleSummary, SaleWithItems } from '@/lib/types'
 
@@ -16,27 +22,58 @@ const rangeLabels: Record<Range, string> = {
 
 export default function ReportsPage() {
   const [range, setRange] = useState<Range>('daily')
+  const [startDate, setStartDate] = useState(() => formatNicaraguaDateInput())
+  const [endDate, setEndDate] = useState(() => formatNicaraguaDateInput())
   const [sales, setSales] = useState<SaleWithItems[]>([])
   const [exporting, setExporting] = useState(false)
+  const [loading, setLoading] = useState(false)
 
-  const fromDate = useMemo(() => getStartOfNicaraguaRange(range), [range])
+  const dateRange = useMemo(() => getNicaraguaDateInputRange(startDate, endDate), [startDate, endDate])
+  const isInvalidRange = Boolean(startDate && endDate && startDate > endDate)
+  const reportLabel = startDate === endDate ? startDate : `${startDate} a ${endDate}`
+
+  const applyPreset = (nextRange: Range) => {
+    setRange(nextRange)
+    setEndDate(formatNicaraguaDateInput())
+
+    if (nextRange === 'daily') {
+      setStartDate(formatNicaraguaDateInput())
+      return
+    }
+
+    if (nextRange === 'weekly') {
+      setStartDate(getNicaraguaDateInputFromToday({ days: -6 }))
+      return
+    }
+
+    setStartDate(getNicaraguaDateInputFromToday({ months: -1 }))
+  }
 
   useEffect(() => {
     const loadSales = async () => {
+      if (!dateRange || isInvalidRange) {
+        setSales([])
+        return
+      }
+
+      setLoading(true)
       const { data: salesData, error: salesError } = await supabase
         .from('sales')
         .select('id,sale_code,total,payment_method,customer_name,created_at')
-        .gte('created_at', fromDate)
+        .gte('created_at', dateRange.from)
+        .lt('created_at', dateRange.to)
         .order('created_at', { ascending: false })
 
       if (salesError || !salesData) {
         setSales([])
+        setLoading(false)
         return
       }
 
       const baseSales = salesData as SaleSummary[]
       if (baseSales.length === 0) {
         setSales([])
+        setLoading(false)
         return
       }
 
@@ -54,10 +91,11 @@ export default function ReportsPage() {
       }, {})
 
       setSales(baseSales.map((sale) => ({ ...sale, sale_items: itemsBySaleId[sale.id] ?? [] })))
+      setLoading(false)
     }
 
     loadSales()
-  }, [fromDate])
+  }, [dateRange, isInvalidRange])
 
   const total = sales.reduce((sum, sale) => sum + Number(sale.total), 0)
   const average = sales.length ? total / sales.length : 0
@@ -75,7 +113,7 @@ export default function ReportsPage() {
       doc.setFontSize(18)
       doc.text('Farmacia Ocampo', 14, 18)
       doc.setFontSize(12)
-      doc.text(`Reporte de ventas ${rangeLabels[range].toLowerCase()}`, 14, 27)
+      doc.text(`Reporte de ventas: ${reportLabel}`, 14, 27)
       doc.setFontSize(10)
       doc.text(`Generado: ${formatNicaraguaDateTime(generatedAt)}`, 14, 35)
       doc.text(`Ventas registradas: ${sales.length}`, 14, 42)
@@ -103,21 +141,21 @@ export default function ReportsPage() {
         },
       })
 
-      doc.save(`reporte-ventas-${range}-${fileDate}.pdf`)
+      doc.save(`reporte-ventas-${startDate}-${endDate || fileDate}.pdf`)
     } finally {
       setExporting(false)
     }
   }
 
   return (
-    <AppShell title="Reportes de ventas" subtitle="Consulta ventas diarias, semanales y mensuales.">
+    <AppShell title="Reportes de ventas" subtitle="Consulta ventas por fecha o por rango de fechas.">
       <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="flex flex-wrap gap-2">
             {Object.entries(rangeLabels).map(([key, label]) => (
               <button
                 key={key}
-                onClick={() => setRange(key as Range)}
+                onClick={() => applyPreset(key as Range)}
                 className={`rounded-md px-4 py-2 text-sm font-semibold ${range === key ? 'bg-emerald-700 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
               >
                 {label}
@@ -126,17 +164,45 @@ export default function ReportsPage() {
           </div>
           <button
             onClick={exportPdf}
-            disabled={exporting}
+            disabled={exporting || isInvalidRange}
             className="rounded-md border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:border-slate-300 disabled:text-slate-400"
           >
             {exporting ? 'Generando PDF...' : 'Descargar PDF'}
           </button>
         </div>
-        <div className="mt-3 text-sm text-slate-500">El PDF se genera con el mismo periodo que ves en pantalla.</div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:max-w-xl">
+          <label className="text-sm font-medium text-slate-700">
+            Desde
+            <input
+              type="date"
+              value={startDate}
+              onChange={(event) => {
+                setRange('daily')
+                setStartDate(event.target.value)
+              }}
+              className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 shadow-sm focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
+            />
+          </label>
+          <label className="text-sm font-medium text-slate-700">
+            Hasta
+            <input
+              type="date"
+              value={endDate}
+              onChange={(event) => {
+                setRange('daily')
+                setEndDate(event.target.value)
+              }}
+              className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 shadow-sm focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
+            />
+          </label>
+        </div>
+        <div className={`mt-3 text-sm ${isInvalidRange ? 'text-red-600' : 'text-slate-500'}`}>
+          {isInvalidRange ? 'La fecha inicial no puede ser mayor que la fecha final.' : `Mostrando ventas del ${reportLabel}. El PDF usa este mismo rango.`}
+        </div>
       </section>
 
       <section className="mt-6 grid gap-4 md:grid-cols-3">
-        <Metric label={`Ventas (${rangeLabels[range].toLowerCase()})`} value={sales.length.toString()} />
+        <Metric label="Ventas encontradas" value={loading ? '...' : sales.length.toString()} />
         <Metric label="Total vendido" value={`C$ ${total.toFixed(2)}`} />
         <Metric label="Promedio por venta" value={`C$ ${average.toFixed(2)}`} />
       </section>
@@ -178,7 +244,7 @@ export default function ReportsPage() {
             ))}
           </tbody>
         </table>
-        {sales.length === 0 ? <p className="p-5 text-sm text-slate-500">No hay ventas en este periodo.</p> : null}
+        {sales.length === 0 ? <p className="p-5 text-sm text-slate-500">{loading ? 'Cargando ventas...' : 'No hay ventas en el rango seleccionado.'}</p> : null}
       </section>
     </AppShell>
   )
